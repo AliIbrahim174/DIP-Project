@@ -121,8 +121,8 @@ class ToolsSidebar(QWidget):
         gl.addLayout(r2)
 
         btn_row = QHBoxLayout()
-        btn_in  = QPushButton("⊕ Zoom In")
-        btn_out = QPushButton("⊖ Out")
+        btn_in  = QPushButton(" ⊖ ZoomOut")
+        btn_out = QPushButton(" ⊕ Zoom In")
         btn_in .clicked.connect(
             lambda: self.apply_zoom.emit(self._zoom_scale.value(),
                                          self._zoom_method.currentText()))

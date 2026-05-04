@@ -64,6 +64,8 @@ class MainWindow(QMainWindow):
         self._current: np.ndarray | None = None
         self._history: list[np.ndarray] = []
         self._history_labels: list[str] = []
+        self._redo_stack: list[np.ndarray] = []
+        self._redo_labels: list[str] = []
         self._worker: ProcessingWorker | None = None
         self._current_path: str = ""
         self._loaded_metadata: dict[str, str] = {}
@@ -95,7 +97,9 @@ class MainWindow(QMainWindow):
         self._undo_action.triggered.connect(self._undo)
 
         self._redo_action = QAction("Redo", self)
+        self._redo_action.setShortcut("Ctrl+Shift+Z")
         self._redo_action.triggered.connect(self._redo)
+        self._redo_action.setEnabled(False)
 
         self._reset_action = QAction("Reset", self)
         self._reset_action.setShortcut("Ctrl+R")
@@ -704,11 +708,22 @@ class MainWindow(QMainWindow):
         if self._current is not None:
             self._history.append(self._current.copy())
             self._history_labels.append(label)
+            # New operation invalidates the redo stack
+            self._redo_stack.clear()
+            self._redo_labels.clear()
+            self._redo_action.setEnabled(False)
 
     def _undo(self):
         if not self._history:
             self._set_status("Nothing to undo.", False)
             return
+        # move current state to redo stack, restore previous
+        if self._current is not None:
+            self._redo_stack.append(self._current.copy())
+            # label for redo describes what will be redone
+            self._redo_labels.append(self._history_labels[-1] if self._history_labels else "?")
+            self._redo_action.setEnabled(True)
+
         self._current = self._history.pop()
         label = self._history_labels.pop() if self._history_labels else "?"
         self._pipeline.remove_last()
@@ -720,7 +735,27 @@ class MainWindow(QMainWindow):
         self._set_status(f"Undone: {label}", False)
 
     def _redo(self):
-        self._set_status("Redo is not implemented yet.", False)
+        if not self._redo_stack:
+            self._set_status("Nothing to redo.", False)
+            return
+        # push current to history, restore top of redo stack
+        if self._current is not None:
+            self._history.append(self._current.copy())
+            self._history_labels.append(self._redo_labels[-1] if self._redo_labels else "?")
+
+        self._current = self._redo_stack.pop()
+        redo_label = self._redo_labels.pop() if self._redo_labels else "?"
+        # update pipeline UI to reflect redo (append step)
+        self._pipeline.add_step(redo_label)
+        if not self._redo_stack:
+            self._redo_action.setEnabled(False)
+
+        self._zoom_base = None
+        self._zoom_factor = 1.0
+        self._update_canvases()
+        self._update_stats_and_metadata(self._loaded_metadata, self._current_path)
+        self._sync_view_zoom()
+        self._set_status(f"Redone: {redo_label}", False)
 
     def _reset_to_original(self):
         if self._original is None:

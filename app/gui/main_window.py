@@ -261,12 +261,27 @@ class MainWindow(QMainWindow):
             )
             if index == 0:
                 button.setChecked(True)
-            button.clicked.connect(lambda _checked=False, t=tip: self._set_status(t, False))
+            button.clicked.connect(lambda _checked=False, t=tip, i=index: self._set_interaction_mode(i, t))
             self._icon_group.addButton(button)
             layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
 
         layout.addStretch(1)
         return panel
+
+    def _set_interaction_mode(self, index: int, tip: str) -> None:
+        """Set interaction mode based on the icon index and update canvases."""
+        # map indices to modes: 0 -> pan, 7 -> annotate, others -> none
+        if index == 0:
+            mode = "pan"
+        elif index == 7:
+            mode = "annotate"
+        else:
+            mode = "none"
+
+        for canvas in self._all_canvases():
+            canvas.set_interaction_mode(mode)
+
+        self._set_status(tip, False)
 
     def _build_canvas_area(self) -> QWidget:
         area = QWidget()

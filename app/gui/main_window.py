@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
         self._redo_stack: list[np.ndarray] = []
         self._redo_labels: list[str] = []
         self._saved_state: np.ndarray | None = None
+        self._accumulate: bool = True  # True: apply to current (accumulated); False: apply to original
         self._worker: ProcessingWorker | None = None
         self._current_path: str = ""
         self._loaded_metadata: dict[str, str] = {}
@@ -212,6 +213,7 @@ class MainWindow(QMainWindow):
         self._sidebar.apply_edge.connect(self._on_apply_edge)
         self._sidebar.apply_hist_eq.connect(self._on_hist_eq)
         self._sidebar.apply_median.connect(self._on_median)
+        self._sidebar.accumulate_toggled.connect(self._on_accumulate_toggled)
         root.addWidget(self._sidebar)
 
         self._canvas_area = self._build_canvas_area()
@@ -896,6 +898,12 @@ class MainWindow(QMainWindow):
         self._set_status(f"Saved: {os.path.basename(path)}", True)
         return True
 
+    def _on_accumulate_toggled(self, checked: bool) -> None:
+        """Toggle between accumulate (current) and original-based processing."""
+        self._accumulate = checked
+        mode_text = "Accumulating" if checked else "From Original"
+        self._set_status(f"Mode: {mode_text}", False)
+
     def _on_apply_zoom(self, step: float, method: str):
         if not self._require_image():
             return
@@ -911,7 +919,8 @@ class MainWindow(QMainWindow):
 
         self._zoom_factor = new_factor
         direction = "In" if step >= 1.0 else "Out"
-        label = f"Zoom {direction} ({method.split('-')[0]}) — {self._zoom_factor:.2f}×"
+        mode_mark = "(acc)" if self._accumulate else "(orig)"
+        label = f"Zoom {direction} ({method.split('-')[0]}) — {self._zoom_factor:.2f}× {mode_mark}"
 
         zoom_func = bilinear_zoom if method == "Bilinear" else nearest_neighbor_zoom
         self._start_worker(zoom_func, label, self._zoom_base.copy(), self._zoom_factor)
@@ -931,13 +940,17 @@ class MainWindow(QMainWindow):
         else:
             return
 
-        self._start_worker(apply_linear_filter, label, self._current, kernel)
+        mode_mark = "(acc)" if self._accumulate else "(orig)"
+        label = f"{label} {mode_mark}"
+        base_image = self._current if self._accumulate else self._original
+        self._start_worker(apply_linear_filter, label, base_image, kernel)
 
     def _on_apply_edge(self, operator: str, component: str):
         if not self._require_image():
             return
 
-        gray = ensure_gray(self._current)
+        base_image = self._current if self._accumulate else self._original
+        gray = ensure_gray(base_image)
         if operator == "Sobel":
             gx, gy, magnitude = sobel_edge(gray)
         else:
@@ -951,7 +964,8 @@ class MainWindow(QMainWindow):
         result = {"Magnitude": magnitude, "Horizontal (Gx)": gx, "Vertical (Gy)": gy}.get(
             component, magnitude
         )
-        label = f"{operator} Edge ({component})"
+        mode_mark = "(acc)" if self._accumulate else "(orig)"
+        label = f"{operator} Edge ({component}) {mode_mark}"
 
         self._push_history(label)
         self._current = result
@@ -965,15 +979,19 @@ class MainWindow(QMainWindow):
     def _on_hist_eq(self, block_size: int):
         if not self._require_image():
             return
-        gray = ensure_gray(self._current)
-        label = f"Local Hist. Eq. {block_size}×{block_size}"
+        base_image = self._current if self._accumulate else self._original
+        gray = ensure_gray(base_image)
+        mode_mark = "(acc)" if self._accumulate else "(orig)"
+        label = f"Local Hist. Eq. {block_size}×{block_size} {mode_mark}"
         self._start_worker(local_histogram_equalization, label, gray, block_size)
 
     def _on_median(self, kernel_size: int):
         if not self._require_image():
             return
-        label = f"Median Filter {kernel_size}×{kernel_size}"
-        self._start_worker(median_filter_scratch, label, self._current, kernel_size)
+        base_image = self._current if self._accumulate else self._original
+        mode_mark = "(acc)" if self._accumulate else "(orig)"
+        label = f"Median Filter {kernel_size}×{kernel_size} {mode_mark}"
+        self._start_worker(median_filter_scratch, label, base_image, kernel_size)
 
     # --------------------------------------------------------------- about --
 

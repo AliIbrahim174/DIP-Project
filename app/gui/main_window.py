@@ -447,7 +447,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._canvas_spectrum, 1)
         return widget
 
-    # Phase 1: restore edge-view tab. This must stay because _build_canvas_area calls it.
+    # Phase 1: edge-view tab for Sobel / Prewitt Gx, Gy, and magnitude.
     def _build_edge_tab(self) -> QWidget:
         widget = QWidget()
         widget.setStyleSheet("background: #0c0d11;")
@@ -483,6 +483,7 @@ class MainWindow(QMainWindow):
             layout.addWidget(pane)
 
         return widget
+    
     def _build_canvas_footer(self) -> QWidget:
         footer = QWidget()
         footer.setFixedHeight(26)

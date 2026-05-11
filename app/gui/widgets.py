@@ -408,7 +408,7 @@ class HistogramWidget(QWidget):
         self._hist = hist
         self.update()
 
-        # Phase 2 / Member 3: directly display a precomputed ROI histogram.
+    # Phase 2 / Member 3: directly display a precomputed ROI histogram.
     def set_hist(self, hist: np.ndarray) -> None:
         """Set a precomputed 256-bin histogram and redraw."""
         hist = np.asarray(hist, dtype=np.int64)

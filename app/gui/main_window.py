@@ -49,6 +49,10 @@ from ..DIP.morphology import (
     global_threshold,
     opening,
 )
+
+# Phase 2: ROI statistics and synthetic noise engine.
+from ..DIP.noise import inject_gaussian_noise, inject_uniform_noise
+from ..DIP.roi_stats import compute_roi_stats
 from ..core.styles import (
     ACCENT,
     ACCENT_DIM,
@@ -64,7 +68,8 @@ from ..io.image_io import load_image, save_image
 from ..workers.processing_worker import ProcessingWorker
 from .panels import MetadataPanel, PipelinePanel
 from .sidebar import ToolsSidebar
-from .widgets import HistogramWidget, ImageCanvas
+from .roi_dialog import ROIStatsDialog
+from .widgets import HistogramWidget, ImageCanvas, ROIImageCanvas
 
 
 class MainWindow(QMainWindow):
@@ -233,6 +238,10 @@ class MainWindow(QMainWindow):
         self._sidebar.apply_edge.connect(self._on_apply_edge)
         self._sidebar.apply_hist_eq.connect(self._on_hist_eq)
         self._sidebar.apply_median.connect(self._on_median)
+
+        # Phase 2: connect synthetic noise controls from the ROI/statistics task.
+        self._sidebar.apply_noise.connect(self._on_noise)
+
         self._sidebar.accumulate_toggled.connect(self._on_accumulate_toggled)
 
         # Phase 2: connect frequency-domain notch and morphology GUI controls.
@@ -244,6 +253,10 @@ class MainWindow(QMainWindow):
         root.addWidget(self._sidebar)
 
         self._canvas_area = self._build_canvas_area()
+
+        # Phase 2: connect ROI toggle button to the processed canvas ROI mode.
+        self._sidebar.roi_btn.toggled.connect(self._canvas_proc.set_roi_mode)
+
         root.addWidget(self._canvas_area, 1)
 
         self._right_panel = self._build_right_panel()
@@ -323,7 +336,9 @@ class MainWindow(QMainWindow):
         self._canvas_tabs.currentChanged.connect(self._on_tab_changed)
         self._canvas_tabs.setDocumentMode(True)
 
-        self._canvas_proc = ImageCanvas()
+        # Phase 2: processed canvas supports rectangular ROI selection.
+        self._canvas_proc = ROIImageCanvas()
+        self._canvas_proc.roi_selected.connect(self._on_roi_selected)
         self._canvas_tabs.addTab(self._canvas_proc, "Processed")
         self._canvas_tabs.addTab(self._build_split_tab(), "Before / After")
         self._canvas_tabs.addTab(self._build_edge_tab(), "Edge View")
@@ -627,6 +642,35 @@ class MainWindow(QMainWindow):
                 canvases.append(canvas)
         return canvases
 
+    # Phase 2: apply synthetic Gaussian or Uniform noise for ROI/statistical analysis testing.
+    def _on_noise(self, noise_type: str, params: dict):
+        if not self._require_image():
+            return
+
+        base = self._current if self._accumulate else self._original
+        if base is None:
+            return
+
+        param = float(params["param"])
+        mode_mark = "(acc)" if self._accumulate else "(orig)"
+
+        if noise_type == "Gaussian":
+            label = f"Gaussian Noise σ={param:.0f} {mode_mark}"
+            self._start_worker(inject_gaussian_noise, label, base, 0.0, param)
+        else:
+            label = f"Uniform Noise ±{param:.0f} {mode_mark}"
+            self._start_worker(inject_uniform_noise, label, base, -param, param)
+
+    # Phase 2: compute local histogram, mean, and variance for selected ROI.
+    def _on_roi_selected(self, x1: int, y1: int, x2: int, y2: int):
+        if self._current is None:
+            return
+
+        gray = ensure_gray(self._current)
+        hist, mean, var = compute_roi_stats(gray, x1, y1, x2, y2)
+        dlg = ROIStatsDialog(hist, mean, var, parent=self)
+        dlg.exec()
+
     def _update_stats_and_metadata(self, meta: dict | None = None, source_path: str = "") -> None:
         if self._current is None:
             self._meta_panel.clear()
@@ -707,6 +751,7 @@ class MainWindow(QMainWindow):
             getattr(self, "_canvas_gx", None),
             getattr(self, "_canvas_gy", None),
             getattr(self, "_canvas_edge", None),
+            getattr(self, "_canvas_spectrum", None),
         }:
             pos = event.position().toPoint()
             self._cursor_pos.setText(f"{pos.x()}, {pos.y()}")
@@ -1230,6 +1275,8 @@ class MainWindow(QMainWindow):
             "• Fourier spectrum viewer and interactive notch filtering<br>"
             "• Ideal, Butterworth, and Gaussian notch reject filters<br>"
             "• Automatic conjugate notch selection<br>"
+            "• Synthetic Gaussian and Uniform noise injection<br>"
+            "• ROI selection with local histogram, mean, and variance<br>"
             "• Binary morphology: thresholding, erosion, dilation, opening, closing<br>"
             "• Sequential Enhancement Pipeline with undo/redo/reset<br><br>"
             "Team 8 - CUFE - BDE - DIP spring 26",

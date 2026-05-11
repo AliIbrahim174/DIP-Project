@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """Local histogram equalization filter."""
 
 import numpy as np
@@ -46,7 +45,6 @@ def local_histogram_equalization(gray: np.ndarray, block_size: int) -> np.ndarra
 			output[r0:r1, c0:c1] = lut[block.astype(np.uint8)]
 
 	return output
-=======
 """Local histogram equalization filter."""
 
 import numpy as np
@@ -94,4 +92,3 @@ def local_histogram_equalization(gray: np.ndarray, block_size: int) -> np.ndarra
 			output[r0:r1, c0:c1] = lut[block.astype(np.uint8)]
 
 	return output
->>>>>>> 5ed38982684639fe821b2c1d7ee0ffab16341026

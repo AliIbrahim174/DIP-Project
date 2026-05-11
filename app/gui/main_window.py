@@ -1222,13 +1222,15 @@ class MainWindow(QMainWindow):
             self,
             "About MedVision Workbench",
             "<b style='font-size:14px'>MedVision Workbench</b><br>"
-            "<i>Phase 1 — Spatial Domain Operations</i><br><br>"
+            "<i>Phase 2 — Spatial + Frequency Domain Operations</i><br><br>"
             "• Multi-format I/O: DICOM, JPEG, BMP, PNG<br>"
-            "• Custom 2-D convolution (from scratch)<br>"
-            "• Nearest-Neighbor &amp; Bilinear zoom (from scratch)<br>"
-            "• Average, Gaussian, Median filtering (from scratch)<br>"
-            "• Sobel &amp; Prewitt edge detection (from scratch)<br>"
-            "• Local Histogram Equalization (from scratch)<br>"
-            "• Sequential Enhancement Pipeline with undo<br><br>"
+            "• Custom 2-D convolution, zoom, smoothing, median filtering<br>"
+            "• Sobel &amp; Prewitt edge detection<br>"
+            "• Local Histogram Equalization<br>"
+            "• Fourier spectrum viewer and interactive notch filtering<br>"
+            "• Ideal, Butterworth, and Gaussian notch reject filters<br>"
+            "• Automatic conjugate notch selection<br>"
+            "• Binary morphology: thresholding, erosion, dilation, opening, closing<br>"
+            "• Sequential Enhancement Pipeline with undo/redo/reset<br><br>"
             "Team 8 - CUFE - BDE - DIP spring 26",
         )

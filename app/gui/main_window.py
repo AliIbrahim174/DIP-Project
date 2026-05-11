@@ -30,6 +30,7 @@ class MainWindow(QMainWindow):
         self.file_ops = FileOperations()
         self.ui = UIBuilder(self)
         self.handlers = SignalHandlers(self)
+        self.current_tool_mode = "pan"  # Track active tool mode
 
         self._worker: ProcessingWorker | None = None
         self._current_path: str = ""
@@ -317,6 +318,10 @@ class MainWindow(QMainWindow):
         self.ui.actions["redo"].setEnabled(self.state.can_redo())
 
     # ========== Canvas Management ==========
+
+    def get_current_tool_mode(self) -> str:
+        """Get the currently active tool mode."""
+        return self.current_tool_mode
 
     def get_all_canvases(self) -> list:
         """Get all canvas widgets."""

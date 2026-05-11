@@ -47,6 +47,8 @@ class UIBuilder:
         self.labels = {}
         self.sliders = {}
         self.view_menu_actions = []
+        self.icon_group = None  # Will be set in build_icon_panel()
+        self.tool_buttons = {}  # Map index -> button for tool management
 
     def build_actions(self) -> dict:
         """Build all menu actions."""
@@ -170,29 +172,18 @@ class UIBuilder:
         layout.setContentsMargins(0, 8, 0, 8)
         layout.setSpacing(2)
 
-        icon_group = QButtonGroup()
-        icon_group.setExclusive(True)
+        # Store icon group as instance variable to prevent garbage collection
+        self.icon_group = QButtonGroup(self.parent)
+        self.icon_group.setExclusive(True)
         button_data = {}  # Map button -> (index, tip)
         
         icons = [
             ("✥", "Move / Pan"),
-            ("▢", "Marquee Select"),
-            ("✂", "Crop"),
-            ("＋", "Zoom In"),
-            ("－", "Zoom Out"),
-            ("i", "Measure / Info"),
-            ("◌", "Color Picker"),
-            ("✎", "Annotations (Phase 2)"),
-            ("⌖", "Ruler (Phase 2)"),
+            ("✎", "Marker — Draw"),
+            ("✕", "Eraser — Clear"),
         ]
 
         for index, (symbol, tip) in enumerate(icons):
-            if index in (3, 5, 7):
-                sep = QFrame()
-                sep.setFixedSize(28, 1)
-                sep.setStyleSheet("background: #252d42;")
-                layout.addWidget(sep)
-
             button = QToolButton()
             button.setText(symbol)
             button.setToolTip(tip)
@@ -208,7 +199,8 @@ class UIBuilder:
                 button.setChecked(True)
 
             button_data[button] = (index, tip)
-            icon_group.addButton(button)
+            self.tool_buttons[index] = button
+            self.icon_group.addButton(button, index)  # Set button ID explicitly
             layout.addWidget(button, 0, Qt.AlignmentFlag.AlignHCenter)
 
         layout.addStretch(1)
@@ -292,7 +284,7 @@ class UIBuilder:
         spectrum_layout.setContentsMargins(0, 0, 0, 0)
         spectrum_layout.setSpacing(0)
 
-        spectrum_header = QLabel("Fourier Spectrum <span style='color:{};'>click to select notch</span>".format(TEXT3))
+        spectrum_header = QLabel("Fourier Spectrum <span style='color:{};'>click near a spike (auto-snap enabled)</span>".format(TEXT3))
         spectrum_header.setTextFormat(Qt.TextFormat.RichText)
         spectrum_header.setStyleSheet(
             f"padding: 5px 10px; background: {TEXT0}; border-bottom: 1px solid {ACCENT_DIM};"

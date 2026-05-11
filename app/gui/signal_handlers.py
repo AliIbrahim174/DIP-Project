@@ -10,6 +10,7 @@ from ..DIP.edge_detection import prewitt_edge, sobel_edge
 from ..DIP.frequency_domain import (
     apply_notch_filter,
     conjugate_notch_center,
+    snap_to_bright_peak,
     shifted_magnitude_spectrum,
 )
 from ..DIP.histogram_equalization import local_histogram_equalization
@@ -44,8 +45,9 @@ class SignalHandlers:
 
     def on_set_interaction_mode(self, index: int, tip: str) -> None:
         """Set interaction mode based on icon index."""
-        mode_map = {0: "pan", 7: "annotate"}
-        mode = mode_map.get(index, "none")
+        mode_map = {0: "pan", 1: "marker", 2: "eraser"}
+        mode = mode_map.get(index, "pan")
+        self.main.current_tool_mode = mode
 
         for canvas in self.main.get_all_canvases():
             canvas.set_interaction_mode(mode)
@@ -220,7 +222,7 @@ class SignalHandlers:
             canvas_tabs.setCurrentIndex(fourier_index)
 
         self.main.set_status(
-            "Fourier spectrum displayed. Click a bright spike away from the center.",
+            "Fourier spectrum displayed. Click near a bright spike (selection auto-snaps).",
             True,
         )
 
@@ -233,15 +235,26 @@ class SignalHandlers:
         spectrum = spectrum_canvas.get_array()
         h, w = spectrum.shape[:2]
 
-        self.main.state.selected_notch_center = (row, col)
-        mirror_row, mirror_col = conjugate_notch_center((h, w), (row, col))
+        snapped_row, snapped_col = snap_to_bright_peak(
+            spectrum,
+            (row, col),
+            search_radius=14,
+            dc_exclusion_radius=12,
+        )
+
+        self.main.state.selected_notch_center = (snapped_row, snapped_col)
+        mirror_row, mirror_col = conjugate_notch_center((h, w), (snapped_row, snapped_col))
 
         spectrum_canvas.clear_markers()
-        spectrum_canvas.add_marker_at_pixel(row, col)
+        spectrum_canvas.add_marker_at_pixel(snapped_row, snapped_col)
         spectrum_canvas.add_marker_at_pixel(mirror_row, mirror_col)
 
+        picked_val = int(spectrum[snapped_row, snapped_col])
         self.main.set_status(
-            f"Selected notch: ({row}, {col}); conjugate: ({mirror_row}, {mirror_col})",
+            (
+                f"Notch snapped to ({snapped_row}, {snapped_col}) [I={picked_val}] "
+                f"from click ({row}, {col}); conjugate: ({mirror_row}, {mirror_col})"
+            ),
             True,
         )
 

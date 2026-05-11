@@ -33,6 +33,22 @@ from ..DIP.median import median_filter_scratch
 from ..DIP.smoothing import apply_linear_filter, make_average_kernel, make_gaussian_kernel
 from ..DIP.zoom import bilinear_zoom, nearest_neighbor_zoom
 from ..DIP.utils import ensure_gray
+
+# Phase 2: frequency-domain notch filtering engine.
+from ..DIP.frequency_domain import (
+    apply_notch_filter,
+    conjugate_notch_center,
+    shifted_magnitude_spectrum,
+)
+
+# Phase 2: bonus binary morphology engine.
+from ..DIP.morphology import (
+    closing,
+    dilate,
+    erode,
+    global_threshold,
+    opening,
+)
 from ..core.styles import (
     ACCENT,
     ACCENT_DIM,
@@ -56,7 +72,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MedVision Workbench — Phase 1")
+        # Phase 2: title updated after adding frequency-domain and morphology tools.
+        self.setWindowTitle("MedVision Workbench — Phase 2")
         self.resize(1450, 900)
         self.setStyleSheet(DARK_STYLE)
 
@@ -75,6 +92,9 @@ class MainWindow(QMainWindow):
         self._zoom_base: np.ndarray | None = None
         self._zoom_factor: float = 1.0
         self._view_zoom_percent: int = 100
+
+        # Phase 2: stores the clicked Fourier-spectrum notch center as (row, col).
+        self._selected_notch_center: tuple[int, int] | None = None
 
         self._build_actions()
         self.setMenuWidget(self._build_top_bar())
@@ -214,6 +234,13 @@ class MainWindow(QMainWindow):
         self._sidebar.apply_hist_eq.connect(self._on_hist_eq)
         self._sidebar.apply_median.connect(self._on_median)
         self._sidebar.accumulate_toggled.connect(self._on_accumulate_toggled)
+
+        # Phase 2: connect frequency-domain notch and morphology GUI controls.
+        self._sidebar.show_spectrum.connect(self._on_show_spectrum)
+        self._sidebar.apply_notch.connect(self._on_apply_notch)
+        self._sidebar.apply_threshold.connect(self._on_threshold)
+        self._sidebar.apply_morphology.connect(self._on_morphology)
+
         root.addWidget(self._sidebar)
 
         self._canvas_area = self._build_canvas_area()
@@ -301,6 +328,9 @@ class MainWindow(QMainWindow):
         self._canvas_tabs.addTab(self._build_split_tab(), "Before / After")
         self._canvas_tabs.addTab(self._build_edge_tab(), "Edge View")
 
+        # Phase 2: Fourier spectrum tab used for interactive notch selection.
+        self._fourier_tab = self._build_fourier_tab()
+        self._canvas_tabs.addTab(self._fourier_tab, "Fourier")
         self._canvas_tabs.installEventFilter(self)
         self._canvas_proc.installEventFilter(self)
 
@@ -341,9 +371,28 @@ class MainWindow(QMainWindow):
             layout.addWidget(pane)
         return widget
 
-    def _build_edge_tab(self) -> QWidget:
+    # Phase 2: tab that displays log-scaled Fourier magnitude spectrum.
+    def _build_fourier_tab(self) -> QWidget:
         widget = QWidget()
         widget.setStyleSheet("background: #0c0d11;")
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
+
+        header = QLabel("Fourier magnitude spectrum — click a bright periodic-noise spike")
+        header.setStyleSheet(
+            f"padding: 5px 10px; background: {TEXT0}; border-bottom: 1px solid {ACCENT_DIM};"
+            f"font-size: 10px; color: {TEXT2};"
+        )
+
+        self._canvas_spectrum = ImageCanvas()
+        self._canvas_spectrum.set_click_reporting(True)
+        self._canvas_spectrum.image_clicked.connect(self._on_spectrum_clicked)
+
+        layout.addWidget(header)
+        layout.addWidget(self._canvas_spectrum, 1)
+        return widget
+
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
@@ -565,7 +614,9 @@ class MainWindow(QMainWindow):
             getattr(self, "_canvas_gx", None),
             getattr(self, "_canvas_gy", None),
             getattr(self, "_canvas_edge", None),
-        ]:
+
+            # Phase 2: include Fourier spectrum canvas in shared zoom/mode handling.
+            getattr(self, "_canvas_spectrum", None),        ]:
             if canvas is not None:
                 canvases.append(canvas)
         return canvases
@@ -690,6 +741,12 @@ class MainWindow(QMainWindow):
             self._zoom_base = None
             self._zoom_factor = 1.0
             self._view_zoom_percent = 100
+
+            # Phase 2: clear previous Fourier notch selection when a new image loads.
+            self._selected_notch_center = None
+            if hasattr(self, "_canvas_spectrum"):
+                self._canvas_spectrum.clear_markers()
+                self._canvas_spectrum.clear()
 
             self._update_canvases()
             self._update_stats_and_metadata(self._loaded_metadata, path)
@@ -994,6 +1051,165 @@ class MainWindow(QMainWindow):
         self._start_worker(median_filter_scratch, label, base_image, kernel_size)
 
     # --------------------------------------------------------------- about --
+    # Phase 2: choose whether Phase 2 operations apply to current pipeline image or original image.
+    def _phase2_source_image(self) -> np.ndarray | None:
+        """Return selected processing source based on accumulate mode."""
+        if self._current is None:
+            return None
+
+        if self._accumulate:
+            return self._current.copy()
+
+        if self._original is None:
+            return self._current.copy()
+
+        return self._original.copy()
+
+    # Phase 2: commit Phase 2 results into the same sequential enhancement pipeline.
+    def _commit_phase2_result(self, result: np.ndarray, label: str) -> None:
+        """Commit Phase 2 result into the existing sequential pipeline."""
+        if self._current is None:
+            return
+
+        self._history.append(self._current.copy())
+        self._history_labels.append(label)
+
+        self._redo_stack.clear()
+        self._redo_labels.clear()
+        self._redo_action.setEnabled(False)
+
+        mode = "acc" if self._accumulate else "orig"
+        full_label = f"{label} ({mode})"
+
+        self._current = result.astype(np.uint8)
+        self._pipeline.add_step(full_label)
+
+        self._update_canvases()
+        self._update_stats_and_metadata(self._loaded_metadata, self._current_path)
+        self._sync_dirty_state()
+        self._set_status(f"Applied: {full_label}", True)
+
+    # Phase 2: compute and display shifted log Fourier spectrum.
+    def _on_show_spectrum(self) -> None:
+        if not self._require_image():
+            return
+
+        source = self._phase2_source_image()
+        if source is None:
+            return
+
+        spectrum = shifted_magnitude_spectrum(source)
+
+        self._selected_notch_center = None
+        self._canvas_spectrum.clear_markers()
+        self._canvas_spectrum.set_array(spectrum)
+
+        index = self._canvas_tabs.indexOf(self._fourier_tab)
+        if index >= 0:
+            self._canvas_tabs.setCurrentIndex(index)
+
+        self._set_status(
+            "Fourier spectrum displayed. Click a bright spike away from the center.",
+            True,
+        )
+
+    # Phase 2: store clicked Fourier spike and automatically mark conjugate symmetric point.
+    def _on_spectrum_clicked(self, row: int, col: int) -> None:
+        if self._canvas_spectrum.get_array() is None:
+            return
+
+        spectrum = self._canvas_spectrum.get_array()
+        h, w = spectrum.shape[:2]
+
+        self._selected_notch_center = (row, col)
+        mirror_row, mirror_col = conjugate_notch_center((h, w), (row, col))
+
+        self._canvas_spectrum.clear_markers()
+        self._canvas_spectrum.add_marker_at_pixel(row, col)
+        self._canvas_spectrum.add_marker_at_pixel(mirror_row, mirror_col)
+
+        self._set_status(
+            f"Selected notch: ({row}, {col}); conjugate: ({mirror_row}, {mirror_col})",
+            True,
+        )
+
+    # Phase 2: apply Ideal / Butterworth / Gaussian notch reject filter.
+    def _on_apply_notch(self, filter_type: str, radius: float, order: int) -> None:
+        if not self._require_image():
+            return
+
+        if self._selected_notch_center is None:
+            QMessageBox.information(
+                self,
+                "No Notch Selected",
+                "Show the Fourier spectrum first, then click a bright noise spike.",
+            )
+            return
+
+        source = self._phase2_source_image()
+        if source is None:
+            return
+
+        try:
+            result = apply_notch_filter(
+                source,
+                center=self._selected_notch_center,
+                radius=radius,
+                filter_type=filter_type,
+                order=order,
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Notch Filter Error", str(exc))
+            return
+
+        label = f"{filter_type} notch r={radius:.0f}, n={order}"
+        self._commit_phase2_result(result, label)
+
+        # Phase 2: refresh spectrum so reduced frequency spikes can be inspected.
+        spectrum = shifted_magnitude_spectrum(self._current)
+        self._canvas_spectrum.set_array(spectrum)
+
+    # Phase 2: binarize image before morphology.
+    def _on_threshold(self, threshold: int) -> None:
+        if not self._require_image():
+            return
+
+        source = self._phase2_source_image()
+        if source is None:
+            return
+
+        result = global_threshold(source, threshold)
+        self._commit_phase2_result(result, f"Global threshold T={threshold}")
+
+    # Phase 2: apply bonus binary morphology operations.
+    def _on_morphology(self, operation: str, size: int, shape: str) -> None:
+        if not self._require_image():
+            return
+
+        source = self._phase2_source_image()
+        if source is None:
+            return
+
+        try:
+            if operation == "erosion":
+                result = erode(source, size, shape)
+                label = f"Erosion {shape} {size}×{size}"
+            elif operation == "dilation":
+                result = dilate(source, size, shape)
+                label = f"Dilation {shape} {size}×{size}"
+            elif operation == "opening":
+                result = opening(source, size, shape)
+                label = f"Opening {shape} {size}×{size}"
+            elif operation == "closing":
+                result = closing(source, size, shape)
+                label = f"Closing {shape} {size}×{size}"
+            else:
+                raise ValueError("Unknown morphology operation.")
+        except Exception as exc:
+            QMessageBox.critical(self, "Morphology Error", str(exc))
+            return
+
+        self._commit_phase2_result(result, label)
 
     def _show_about(self):
         QMessageBox.about(

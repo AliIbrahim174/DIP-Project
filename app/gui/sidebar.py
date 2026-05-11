@@ -3,7 +3,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QPushButton, QLabel, QComboBox, QDoubleSpinBox, QScrollArea,
-    QToolButton, QFrame, QCheckBox
+    QToolButton, QFrame, QCheckBox, QSpinBox, QSlider
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 
@@ -71,6 +71,14 @@ class ToolsSidebar(QWidget):
     apply_median  = pyqtSignal(int)
     accumulate_toggled = pyqtSignal(bool)
 
+    # Phase 2: Frequency-domain notch filter signals.
+    show_spectrum = pyqtSignal()
+    apply_notch = pyqtSignal(str, float, int)  # filter_type, radius, order
+
+    # Phase 2: Bonus morphology signals.
+    apply_threshold = pyqtSignal(int)             # threshold value
+    apply_morphology = pyqtSignal(str, int, str)  # operation, SE size, SE shape
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(220)
@@ -115,6 +123,11 @@ class ToolsSidebar(QWidget):
         layout.addWidget(self._build_edge_group())
         layout.addWidget(self._build_median_group())
         layout.addWidget(self._build_histeq_group())
+
+        # Phase 2: add frequency-domain notch filtering and morphology controls.
+        layout.addWidget(self._build_frequency_group())
+        layout.addWidget(self._build_morphology_group())
+
         layout.addStretch()
 
         scroll.setWidget(container)
@@ -146,16 +159,26 @@ class ToolsSidebar(QWidget):
         gl.addLayout(r2)
 
         btn_row = QHBoxLayout()
-        btn_in  = QPushButton(" ⊖ ZoomOut")
-        btn_out = QPushButton(" ⊕ Zoom In")
-        btn_in .clicked.connect(
-            lambda: self.apply_zoom.emit(self._zoom_scale.value(),
-                                         self._zoom_method.currentText()))
+
+        # Phase 2 cleanup: correct Zoom Out / Zoom In emitted scale direction.
+        btn_out = QPushButton("⊖ Zoom Out")
+        btn_in = QPushButton("⊕ Zoom In")
+
         btn_out.clicked.connect(
-            lambda: self.apply_zoom.emit(1.0 / self._zoom_scale.value(),
-                                         self._zoom_method.currentText()))
-        btn_row.addWidget(btn_in)
+            lambda: self.apply_zoom.emit(
+                1.0 / self._zoom_scale.value(),
+                self._zoom_method.currentText()
+            )
+        )
+        btn_in.clicked.connect(
+            lambda: self.apply_zoom.emit(
+                self._zoom_scale.value(),
+                self._zoom_method.currentText()
+            )
+        )
+
         btn_row.addWidget(btn_out)
+        btn_row.addWidget(btn_in)
         gl.addLayout(btn_row)
         return section
 
@@ -247,6 +270,115 @@ class ToolsSidebar(QWidget):
         btn = QPushButton("◑ Local Equalize")
         btn.clicked.connect(self._emit_hist_eq)
         hl.addWidget(btn)
+        return section
+
+    # Phase 2: GUI controls for Fourier spectrum display and notch reject filtering.
+    def _build_frequency_group(self) -> QWidget:
+        section = CollapsibleSection("Frequency / Notch Filter", False)
+        fl = section.bodyLayout()
+
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel("Type"))
+        self._notch_type = QComboBox()
+        self._notch_type.addItems(["Ideal", "Butterworth", "Gaussian"])
+        self._notch_type.setCurrentText("Gaussian")
+        r1.addWidget(self._notch_type)
+        fl.addLayout(r1)
+
+        r2 = QHBoxLayout()
+        r2.addWidget(QLabel("Radius"))
+        self._notch_radius = QDoubleSpinBox()
+        self._notch_radius.setRange(1.0, 100.0)
+        self._notch_radius.setSingleStep(1.0)
+        self._notch_radius.setValue(10.0)
+        r2.addWidget(self._notch_radius)
+        fl.addLayout(r2)
+
+        r3 = QHBoxLayout()
+        r3.addWidget(QLabel("Order"))
+        self._notch_order = QSpinBox()
+        self._notch_order.setRange(1, 10)
+        self._notch_order.setValue(2)
+        r3.addWidget(self._notch_order)
+        fl.addLayout(r3)
+
+        btn_show = QPushButton("Show Fourier Spectrum")
+        btn_show.clicked.connect(self.show_spectrum.emit)
+        fl.addWidget(btn_show)
+
+        btn_apply = QPushButton("Apply Selected Notch")
+        btn_apply.clicked.connect(
+            lambda: self.apply_notch.emit(
+                self._notch_type.currentText(),
+                self._notch_radius.value(),
+                self._notch_order.value(),
+            )
+        )
+        fl.addWidget(btn_apply)
+
+        hint = QLabel("1) Show spectrum  2) Click bright spike  3) Apply notch")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #94a3b8; font-size: 9px;")
+        fl.addWidget(hint)
+
+        return section
+
+    # Phase 2: GUI controls for the bonus binary morphology engine.
+    def _build_morphology_group(self) -> QWidget:
+        section = CollapsibleSection("Clinical Morphology Bonus", False)
+        ml = section.bodyLayout()
+
+        self._threshold_label = QLabel("Threshold: 128")
+        ml.addWidget(self._threshold_label)
+
+        self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self._threshold_slider.setRange(0, 255)
+        self._threshold_slider.setValue(128)
+        self._threshold_slider.valueChanged.connect(
+            lambda value: self._threshold_label.setText(f"Threshold: {value}")
+        )
+        ml.addWidget(self._threshold_slider)
+
+        btn_threshold = QPushButton("Binarize")
+        btn_threshold.clicked.connect(
+            lambda: self.apply_threshold.emit(self._threshold_slider.value())
+        )
+        ml.addWidget(btn_threshold)
+
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel("SE Size"))
+        self._se_size = QComboBox()
+        self._se_size.addItems(["3×3", "5×5", "7×7", "9×9", "11×11"])
+        r1.addWidget(self._se_size)
+        ml.addLayout(r1)
+
+        r2 = QHBoxLayout()
+        r2.addWidget(QLabel("SE Shape"))
+        self._se_shape = QComboBox()
+        self._se_shape.addItems(["Square", "Cross"])
+        r2.addWidget(self._se_shape)
+        ml.addLayout(r2)
+
+        grid = QGridLayout()
+        buttons = [
+            ("Erosion", "erosion"),
+            ("Dilation", "dilation"),
+            ("Opening", "opening"),
+            ("Closing", "closing"),
+        ]
+
+        for index, (label, operation) in enumerate(buttons):
+            btn = QPushButton(label)
+            btn.clicked.connect(
+                lambda _checked=False, op=operation: self.apply_morphology.emit(
+                    op,
+                    self._combo_size(self._se_size),
+                    self._se_shape.currentText(),
+                )
+            )
+            grid.addWidget(btn, index // 2, index % 2)
+
+        ml.addLayout(grid)
         return section
 
     # ── Signal emitters ───────────────────────────────────────────────────────

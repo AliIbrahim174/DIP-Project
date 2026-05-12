@@ -266,12 +266,12 @@ class ToolsSidebar(QWidget):
         r2.addWidget(self._noise_param)
         nl.addLayout(r2)
 
-        btn = QPushButton("⚡ Inject Noise")
+        btn = QPushButton("Inject Noise")
         btn.clicked.connect(self._emit_noise)
         nl.addWidget(btn)
 
         # Phase 2 / Member 3: MainWindow connects this toggle to ROIImageCanvas.set_roi_mode.
-        self.roi_btn = QPushButton("▢ Draw ROI")
+        self.roi_btn = QPushButton("Draw ROI")
         self.roi_btn.setCheckable(True)
         nl.addWidget(self.roi_btn)
 

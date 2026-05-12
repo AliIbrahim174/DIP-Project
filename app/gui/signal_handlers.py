@@ -339,7 +339,7 @@ class SignalHandlers:
     # ========== ROI and Statistics ==========
 
     def on_roi_selected(self, x1: int, y1: int, x2: int, y2: int) -> None:
-        """Handle ROI selection."""
+        """Handle ROI selection and display stats dialog with operations."""
         if self.main.state.current is None:
             return
 
@@ -348,9 +348,66 @@ class SignalHandlers:
             sidebar.roi_btn.setChecked(False)
 
         gray = ensure_gray(self.main.state.current)
-        hist, mean, var = compute_roi_stats(gray, x1, y1, x2, y2)
-        dlg = ROIStatsDialog(hist, mean, var, parent=self.main)
+        stats = compute_roi_stats(gray, x1, y1, x2, y2)
+        
+        # Store ROI bounds for operations
+        self._last_roi_bounds = (x1, y1, x2, y2)
+        
+        dlg = ROIStatsDialog(
+            stats, 
+            parent=self.main,
+            on_apply_callback=self._on_roi_operation
+        )
         dlg.exec()
+
+    def _on_roi_operation(self, op_id: str, stats: dict) -> None:
+        """Handle ROI operations: equalize, median filter, or extract."""
+        if not hasattr(self, '_last_roi_bounds'):
+            return
+        
+        x1, y1, x2, y2 = self._last_roi_bounds
+        x1, x2 = min(x1, x2), max(x1, x2)
+        y1, y2 = min(y1, y2), max(y1, y2)
+        
+        current = self.main.state.current.copy()
+        is_rgb = current.ndim == 3  # Track if original is RGB
+        
+        # Convert to grayscale for processing if needed
+        if is_rgb:
+            current_gray = ensure_gray(current)
+        else:
+            current_gray = current
+        
+        if op_id == "equalize_roi":
+            # Apply local histogram equalization to ROI
+            roi_gray = current_gray[y1:y2, x1:x2]
+            # Use block_size relative to ROI size (minimum 8, maximum half the smaller dimension)
+            roi_h, roi_w = roi_gray.shape
+            block_size = max(8, min(roi_h, roi_w) // 4)
+            equalized_roi = local_histogram_equalization(roi_gray, block_size=block_size)
+            current_gray[y1:y2, x1:x2] = equalized_roi
+            label = "Local Histogram Equalization (ROI)"
+            result = current_gray
+            
+        elif op_id == "median_roi":
+            # Apply median filter to ROI
+            roi_gray = current_gray[y1:y2, x1:x2]
+            filtered_roi = median_filter_scratch(roi_gray, kernel_size=3)
+            current_gray[y1:y2, x1:x2] = filtered_roi
+            label = "Median Filter (ROI)"
+            result = current_gray
+            
+        elif op_id == "extract_roi":
+            # Extract ROI to separate image and display
+            roi_region = stats['roi_array']
+            if roi_region.size == 0:
+                return
+            result = roi_region
+            label = "Extract ROI"
+        else:
+            return
+
+        self.main.commit_phase2_result(result, label)
 
     # ========== Event Filter ==========
 
